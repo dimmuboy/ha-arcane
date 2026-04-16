@@ -1,0 +1,23 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect to Arcane",
+        "description": "Please enter the connection details for your Arcane instance.",
+        "data": {
+          "host": "Host",
+          "api_key": "API Key",
+          "env_id": "Environment ID"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect",
+      "invalid_auth": "Invalid authentication",
+      "unknown": "Unexpected error"
+    },
+    "abort": {
+      "already_configured": "Device is already configured"
+    }
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "domain": "arcane",
+  "name": "Arcane",
+  "codeowners": ["@Sklls-Z"],
+  "config_flow": true,
+  "dependencies": [],
+  "documentation": "https://github.com/Sklls-Z/ha-arcane",
+  "issue_tracker": "https://github.com/Sklls-Z/ha-arcane/issues",
+  "iot_class": "local_polling",
+  "requirements": [],
+  "version": "1.0.0",
+  "integration_type": "hub"
+}
