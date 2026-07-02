@@ -101,7 +101,6 @@ class ArcaneUpdateEntity(CoordinatorEntity, UpdateEntity):
         if container is None:
             return None
         # Arcane provides update type (digest, tag, error) but not direct release URL
-        # Return Arcane dashboard link
         return None
 
     async def async_install(
@@ -113,19 +112,41 @@ class ArcaneUpdateEntity(CoordinatorEntity, UpdateEntity):
         1. Pulls the latest image from registry
         2. Recreates the container with the new image
         3. Preserves all configuration and networks
+        
+        Args:
+            version: Version to install (ignored, uses latest)
+            backup: Whether to backup (informational only)
+            **kwargs: Additional arguments from Home Assistant
+        
+        Raises:
+            Exception: If redeploy fails
         """
+        container = self.coordinator.data.get(self._container_id)
+        if not container:
+            raise ValueError(f"Container {self._container_id} not found")
+        
+        container_name = container.get("names", [self._container_id])[0].lstrip("/")
+        
         try:
             _LOGGER.info(
-                "Installing update for container %s via redeploy",
+                "Installing update for container '%s' (%s) via redeploy",
+                container_name,
                 self._container_id,
             )
-            await self.coordinator.api.redeploy_container(self._container_id)
+            
+            # Call the redeploy endpoint
+            result = await self.coordinator.api.redeploy_container(self._container_id)
+            
+            _LOGGER.info(
+                "Successfully redeployed container '%s": %s",
+                container_name,
+                result,
+            )
+            
             # Refresh coordinator data after redeployment
             await self.coordinator.async_request_refresh()
+            
         except Exception as err:
-            _LOGGER.error(
-                "Error redeploying container %s: %s",
-                self._container_id,
-                err,
-            )
-            raise
+            error_msg = f"Failed to redeploy container '{container_name}': {err}"
+            _LOGGER.error(error_msg)
+            raise Exception(error_msg) from err

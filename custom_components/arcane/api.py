@@ -6,7 +6,7 @@ import async_timeout
 
 _LOGGER = logging.getLogger(__name__)
 
-TIMEOUT = 10
+TIMEOUT = 30  # Increased timeout for redeploy operations
 
 
 class ArcaneAuthError(Exception):
@@ -77,20 +77,56 @@ class ArcaneAPI:
         
         This is the correct endpoint to use for updating a container to the latest image.
         Arcane automatically detects image updates through updateInfo in container data.
+        
+        Returns the response from Arcane API.
+        Raises exceptions on failure.
         """
         url = f"{self._host}/api/environments/{self._env_id}/containers/{container_id}/redeploy"
         try:
             async with async_timeout.timeout(TIMEOUT):
+                _LOGGER.debug("Sending redeploy request to: %s", url)
                 response = await self._session.post(url, headers=self._headers)
+                
+                # Log response status
+                _LOGGER.debug("Redeploy response status: %s", response.status)
+                
                 if response.status == 401:
                     raise ArcaneAuthError("Invalid API Key")
-                response.raise_for_status()
-                return await response.json()
+                
+                # Handle various status codes
+                if response.status >= 400:
+                    error_text = await response.text()
+                    _LOGGER.error(
+                        "Redeploy failed with status %s: %s",
+                        response.status,
+                        error_text,
+                    )
+                    raise Exception(f"Redeploy failed: {response.status} - {error_text}")
+                
+                # Try to parse as JSON, but handle empty responses
+                try:
+                    result = await response.json()
+                    _LOGGER.debug("Redeploy response: %s", result)
+                    return result
+                except (aiohttp.ContentTypeError, ValueError):
+                    # Empty or non-JSON response is OK for successful redeploy
+                    _LOGGER.debug("Redeploy successful (empty response)")
+                    return {"success": True}
+                    
+        except asyncio.TimeoutError as exception:
+            _LOGGER.error("Timeout redeploying container %s", container_id)
+            raise Exception(f"Redeploy timeout for container {container_id}") from exception
         except aiohttp.ClientError as exception:
-            _LOGGER.error("Error redeploying container %s: %s", container_id, exception)
-            raise
+            _LOGGER.error("Client error redeploying container %s: %s", container_id, exception)
+            raise Exception(f"Client error: {exception}") from exception
         except Exception as exception:
             _LOGGER.error(
-                "Unexpected error redeploying container %s: %s", container_id, exception
+                "Unexpected error redeploying container %s: %s",
+                container_id,
+                exception,
             )
             raise
+
+
+# Import asyncio at module level
+import asyncio
