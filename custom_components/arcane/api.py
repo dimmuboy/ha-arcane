@@ -1,5 +1,6 @@
 import logging
 from typing import Any, Dict, List
+import asyncio
 
 import aiohttp
 import async_timeout
@@ -83,50 +84,51 @@ class ArcaneAPI:
         """
         url = f"{self._host}/api/environments/{self._env_id}/containers/{container_id}/redeploy"
         try:
+            _LOGGER.info("Starting redeploy for container %s", container_id)
+            _LOGGER.debug("Redeploy URL: %s", url)
+            _LOGGER.debug("Headers: %s", self._headers)
+            
             async with async_timeout.timeout(TIMEOUT):
-                _LOGGER.debug("Sending redeploy request to: %s", url)
+                _LOGGER.debug("Sending POST request to redeploy endpoint")
                 response = await self._session.post(url, headers=self._headers)
                 
-                # Log response status
-                _LOGGER.debug("Redeploy response status: %s", response.status)
+                _LOGGER.info("Redeploy response status: %d", response.status)
+                _LOGGER.debug("Response headers: %s", response.headers)
                 
                 if response.status == 401:
+                    error_text = await response.text()
+                    _LOGGER.error("Authentication failed: %s", error_text)
                     raise ArcaneAuthError("Invalid API Key")
                 
-                # Handle various status codes
                 if response.status >= 400:
                     error_text = await response.text()
                     _LOGGER.error(
-                        "Redeploy failed with status %s: %s",
+                        "Redeploy failed with status %d: %s",
                         response.status,
                         error_text,
                     )
-                    raise Exception(f"Redeploy failed: {response.status} - {error_text}")
+                    raise Exception(f"HTTP {response.status}: {error_text}")
                 
-                # Try to parse as JSON, but handle empty responses
+                # Success - try to parse response
                 try:
                     result = await response.json()
-                    _LOGGER.debug("Redeploy response: %s", result)
+                    _LOGGER.info("Redeploy successful, response: %s", result)
                     return result
-                except (aiohttp.ContentTypeError, ValueError):
-                    # Empty or non-JSON response is OK for successful redeploy
-                    _LOGGER.debug("Redeploy successful (empty response)")
+                except (aiohttp.ContentTypeError, ValueError) as e:
+                    _LOGGER.debug("Non-JSON response (this is OK): %s", e)
                     return {"success": True}
                     
-        except asyncio.TimeoutError as exception:
-            _LOGGER.error("Timeout redeploying container %s", container_id)
-            raise Exception(f"Redeploy timeout for container {container_id}") from exception
-        except aiohttp.ClientError as exception:
-            _LOGGER.error("Client error redeploying container %s: %s", container_id, exception)
-            raise Exception(f"Client error: {exception}") from exception
-        except Exception as exception:
-            _LOGGER.error(
-                "Unexpected error redeploying container %s: %s",
-                container_id,
-                exception,
-            )
+        except asyncio.TimeoutError as e:
+            error_msg = f"Redeploy timeout (exceeded {TIMEOUT}s)"
+            _LOGGER.error(error_msg)
+            raise Exception(error_msg) from e
+        except aiohttp.ClientError as e:
+            error_msg = f"Client error during redeploy: {type(e).__name__}: {e}"
+            _LOGGER.error(error_msg)
+            raise Exception(error_msg) from e
+        except ArcaneAuthError:
             raise
-
-
-# Import asyncio at module level
-import asyncio
+        except Exception as e:
+            error_msg = f"Unexpected error redeploying container {container_id}: {type(e).__name__}: {e}"
+            _LOGGER.error(error_msg, exc_info=True)
+            raise Exception(error_msg) from e

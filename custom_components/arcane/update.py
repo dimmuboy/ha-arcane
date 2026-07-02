@@ -100,7 +100,6 @@ class ArcaneUpdateEntity(CoordinatorEntity, UpdateEntity):
         container = self.coordinator.data.get(self._container_id)
         if container is None:
             return None
-        # Arcane provides update type (digest, tag, error) but not direct release URL
         return None
 
     async def async_install(
@@ -127,18 +126,23 @@ class ArcaneUpdateEntity(CoordinatorEntity, UpdateEntity):
         
         container_name = container.get("names", [self._container_id])[0].lstrip("/")
         
+        _LOGGER.info(
+            "User requested update for container '%s' (%s)",
+            container_name,
+            self._container_id,
+        )
+        
         try:
             _LOGGER.info(
-                "Installing update for container '%s' (%s) via redeploy",
+                "Installing update for container '%s' via redeploy",
                 container_name,
-                self._container_id,
             )
             
             # Call the redeploy endpoint
             result = await self.coordinator.api.redeploy_container(self._container_id)
             
             _LOGGER.info(
-                "Successfully redeployed container '%s": %s",
+                "Successfully initiated redeploy for container '%s': %s",
                 container_name,
                 result,
             )
@@ -148,5 +152,5 @@ class ArcaneUpdateEntity(CoordinatorEntity, UpdateEntity):
             
         except Exception as err:
             error_msg = f"Failed to redeploy container '{container_name}': {err}"
-            _LOGGER.error(error_msg)
+            _LOGGER.error(error_msg, exc_info=True)
             raise Exception(error_msg) from err
