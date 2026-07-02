@@ -71,3 +71,37 @@ class ArcaneAPI:
                 "Unexpected error controlling container %s: %s", container_id, exception
             )
             raise
+
+    async def check_updates(self, container_id: str) -> Dict[str, Any]:
+        """Check for available updates for a container."""
+        url = f"{self._host}/api/environments/{self._env_id}/containers/{container_id}/updates"
+        try:
+            async with async_timeout.timeout(TIMEOUT):
+                response = await self._session.get(url, headers=self._headers)
+                if response.status == 401:
+                    raise ArcaneAuthError("Invalid API Key")
+                response.raise_for_status()
+                return await response.json()
+        except aiohttp.ClientError as exception:
+            _LOGGER.error("Error checking updates for container %s: %s", container_id, exception)
+            raise
+        except Exception as exception:
+            _LOGGER.error("Unexpected error checking updates for container %s: %s", container_id, exception)
+            raise
+
+    async def install_update(self, container_id: str) -> Dict[str, Any]:
+        """Install update for a container via Arcane."""
+        url = f"{self._host}/api/environments/{self._env_id}/containers/{container_id}/update"
+        try:
+            async with async_timeout.timeout(TIMEOUT):
+                response = await self._session.post(url, headers=self._headers)
+                if response.status == 401:
+                    raise ArcaneAuthError("Invalid API Key")
+                response.raise_for_status()
+                return await response.json()
+        except aiohttp.ClientError as exception:
+            _LOGGER.error("Error installing update for container %s: %s", container_id, exception)
+            raise
+        except Exception as exception:
+            _LOGGER.error("Unexpected error installing update for container %s: %s", container_id, exception)
+            raise

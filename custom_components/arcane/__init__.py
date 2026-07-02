@@ -15,7 +15,7 @@ from .api import ArcaneAPI
 from .const import CONF_API_KEY, CONF_ENV_ID, CONF_HOST, DEFAULT_SCAN_INTERVAL, DOMAIN, SIGNAL_NEW_CONTAINERS
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 
-PLATFORMS: list[Platform] = [Platform.SENSOR, Platform.SWITCH]
+PLATFORMS: list[Platform] = [Platform.SENSOR, Platform.SWITCH, Platform.UPDATE]
 
 _LOGGER = logging.getLogger(__name__)
 
