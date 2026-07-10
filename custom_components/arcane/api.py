@@ -1,13 +1,14 @@
-import logging
-from typing import Any, Dict, List
 import asyncio
+import logging
+from typing import Any, Dict
 
 import aiohttp
 import async_timeout
 
 _LOGGER = logging.getLogger(__name__)
 
-TIMEOUT = 30  # Increased timeout for redeploy operations
+TIMEOUT = 30
+REDEPLOY_TIMEOUT = 300
 
 
 class ArcaneAuthError(Exception):
@@ -74,32 +75,23 @@ class ArcaneAPI:
             raise
 
     async def redeploy_container(self, container_id: str) -> Dict[str, Any]:
-        """Redeploy container (pull latest image and recreate).
-        
-        This is the correct endpoint to use for updating a container to the latest image.
-        Arcane automatically detects image updates through updateInfo in container data.
-        
-        Returns the response from Arcane API.
-        Raises exceptions on failure.
-        """
+        """Redeploy container by asking Arcane to pull the latest image and recreate it."""
         url = f"{self._host}/api/environments/{self._env_id}/containers/{container_id}/redeploy"
         try:
             _LOGGER.info("Starting redeploy for container %s", container_id)
             _LOGGER.debug("Redeploy URL: %s", url)
-            _LOGGER.debug("Headers: %s", self._headers)
-            
-            async with async_timeout.timeout(TIMEOUT):
-                _LOGGER.debug("Sending POST request to redeploy endpoint")
+
+            async with async_timeout.timeout(REDEPLOY_TIMEOUT):
                 response = await self._session.post(url, headers=self._headers)
-                
+
                 _LOGGER.info("Redeploy response status: %d", response.status)
                 _LOGGER.debug("Response headers: %s", response.headers)
-                
+
                 if response.status == 401:
                     error_text = await response.text()
                     _LOGGER.error("Authentication failed: %s", error_text)
                     raise ArcaneAuthError("Invalid API Key")
-                
+
                 if response.status >= 400:
                     error_text = await response.text()
                     _LOGGER.error(
@@ -108,18 +100,17 @@ class ArcaneAPI:
                         error_text,
                     )
                     raise Exception(f"HTTP {response.status}: {error_text}")
-                
-                # Success - try to parse response
+
                 try:
                     result = await response.json()
                     _LOGGER.info("Redeploy successful, response: %s", result)
                     return result
                 except (aiohttp.ContentTypeError, ValueError) as e:
-                    _LOGGER.debug("Non-JSON response (this is OK): %s", e)
+                    _LOGGER.debug("Non-JSON response from redeploy endpoint: %s", e)
                     return {"success": True}
-                    
+
         except asyncio.TimeoutError as e:
-            error_msg = f"Redeploy timeout (exceeded {TIMEOUT}s)"
+            error_msg = f"Redeploy timeout (exceeded {REDEPLOY_TIMEOUT}s)"
             _LOGGER.error(error_msg)
             raise Exception(error_msg) from e
         except aiohttp.ClientError as e:
