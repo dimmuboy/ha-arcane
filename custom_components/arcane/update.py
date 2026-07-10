@@ -6,11 +6,13 @@ from typing import Any
 from homeassistant.components.update import UpdateEntity, UpdateEntityFeature
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN
 from .__init__ import ArcaneDataUpdateCoordinator
+from .const import DOMAIN, SIGNAL_NEW_CONTAINERS
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -20,25 +22,34 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up Update entity for Arcane containers."""
+    """Set up Update entities for Arcane containers."""
     coordinator: ArcaneDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]
 
-    entities = []
-    for container_id in coordinator.data.keys():
-        entities.append(ArcaneUpdateEntity(coordinator, container_id))
+    def async_add_container_updates(ids: set[str] | None = None) -> None:
+        """Add update entities for new containers."""
+        if ids is None:
+            ids = set(coordinator.data.keys())
 
-    if entities:
-        async_add_entities(entities)
+        entities = []
+        for container_id in ids:
+            entities.append(ArcaneUpdateEntity(coordinator, container_id))
+
+        if entities:
+            async_add_entities(entities)
+
+    async_add_container_updates()
+
+    entry.async_on_unload(
+        async_dispatcher_connect(
+            hass,
+            f"{SIGNAL_NEW_CONTAINERS}_{entry.entry_id}",
+            async_add_container_updates,
+        )
+    )
 
 
 class ArcaneUpdateEntity(CoordinatorEntity, UpdateEntity):
-    """Update entity for Docker containers managed via Arcane.
-    
-    This entity uses the official Home Assistant Update platform to show and manage
-    container updates. Updates are detected automatically through Arcane's updateInfo.
-    """
-
-    _attr_supported_features = UpdateEntityFeature.INSTALL
+    """Update entity for Docker containers managed via Arcane."""
 
     def __init__(
         self,
@@ -53,9 +64,32 @@ class ArcaneUpdateEntity(CoordinatorEntity, UpdateEntity):
         self._attr_icon = "mdi:download"
 
     @property
+    def _container(self) -> dict[str, Any] | None:
+        """Return the current container payload from Arcane."""
+        return self.coordinator.data.get(self._container_id)
+
+    @property
+    def _redeploy_disabled(self) -> bool:
+        """Return whether Arcane blocks redeploy for this container."""
+        container = self._container
+        return bool(container and container.get("redeployDisabled"))
+
+    @property
+    def available(self) -> bool:
+        """Return whether this update entity can be used."""
+        return self._container is not None and not self._redeploy_disabled
+
+    @property
+    def supported_features(self) -> UpdateEntityFeature:
+        """Return supported features for this update entity."""
+        if self._redeploy_disabled:
+            return UpdateEntityFeature(0)
+        return UpdateEntityFeature.INSTALL
+
+    @property
     def device_info(self) -> dict[str, Any]:
         """Return device information."""
-        container = self.coordinator.data.get(self._container_id, {})
+        container = self._container or {}
         return {
             "identifiers": {(DOMAIN, self._container_id)},
             "name": container.get("names", [self._container_id])[0].lstrip("/"),
@@ -66,91 +100,61 @@ class ArcaneUpdateEntity(CoordinatorEntity, UpdateEntity):
 
     @property
     def installed_version(self) -> str | None:
-        """Return the currently installed version (image reference)."""
-        container = self.coordinator.data.get(self._container_id)
+        """Return the currently installed image reference."""
+        container = self._container
         if container is None:
             return None
         return container.get("image")
 
     @property
     def latest_version(self) -> str | None:
-        """Return the latest available version.
-        
-        Arcane automatically detects updates through updateInfo field.
-        If hasUpdate is true, we return the latest version.
-        Otherwise, we return the current version.
-        """
-        container = self.coordinator.data.get(self._container_id)
+        """Return the latest available image version or digest."""
+        container = self._container
         if container is None:
             return None
-        
+
         update_info = container.get("updateInfo")
         if update_info and update_info.get("hasUpdate"):
-            # Return the latest version info
             latest = update_info.get("latestVersion") or update_info.get("latestDigest")
             if latest:
                 return latest
-        
-        # No update available, return current version
+
         return self.installed_version
 
     @property
     def release_url(self) -> str | None:
         """Return the URL to the release notes."""
-        container = self.coordinator.data.get(self._container_id)
-        if container is None:
-            return None
         return None
 
     async def async_install(
         self, version: str | None = None, backup: bool = True, **kwargs: Any
     ) -> None:
-        """Install an update by redeploying the container.
-        
-        Uses Arcane's redeploy endpoint which:
-        1. Pulls the latest image from registry
-        2. Recreates the container with the new image
-        3. Preserves all configuration and networks
-        
-        Args:
-            version: Version to install (ignored, uses latest)
-            backup: Whether to backup (informational only)
-            **kwargs: Additional arguments from Home Assistant
-        
-        Raises:
-            Exception: If redeploy fails
-        """
-        container = self.coordinator.data.get(self._container_id)
+        """Install an update by redeploying the container in Arcane."""
+        container = self._container
         if not container:
-            raise ValueError(f"Container {self._container_id} not found")
-        
+            raise HomeAssistantError(f"Container {self._container_id} not found")
+
         container_name = container.get("names", [self._container_id])[0].lstrip("/")
-        
+        if self._redeploy_disabled:
+            raise HomeAssistantError(
+                f"Arcane does not allow redeploying container '{container_name}'"
+            )
+
         _LOGGER.info(
-            "User requested update for container '%s' (%s)",
+            "Installing update for container '%s' (%s) via Arcane redeploy",
             container_name,
             self._container_id,
         )
-        
+
         try:
-            _LOGGER.info(
-                "Installing update for container '%s' via redeploy",
-                container_name,
-            )
-            
-            # Call the redeploy endpoint
             result = await self.coordinator.api.redeploy_container(self._container_id)
-            
             _LOGGER.info(
                 "Successfully initiated redeploy for container '%s': %s",
                 container_name,
                 result,
             )
-            
-            # Refresh coordinator data after redeployment
             await self.coordinator.async_request_refresh()
-            
         except Exception as err:
             error_msg = f"Failed to redeploy container '{container_name}': {err}"
             _LOGGER.error(error_msg, exc_info=True)
-            raise Exception(error_msg) from err
+            raise HomeAssistantError(error_msg) from err
