@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 from datetime import timedelta
 import logging
 
@@ -9,11 +8,18 @@ from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .api import ArcaneAPI
-from .const import CONF_API_KEY, CONF_ENV_ID, CONF_HOST, DEFAULT_SCAN_INTERVAL, DOMAIN, SIGNAL_NEW_CONTAINERS
-from homeassistant.helpers.dispatcher import async_dispatcher_send
+from .const import (
+    CONF_API_KEY,
+    CONF_ENV_ID,
+    CONF_HOST,
+    DEFAULT_SCAN_INTERVAL,
+    DOMAIN,
+    SIGNAL_NEW_CONTAINERS,
+)
 
 PLATFORMS: list[Platform] = [Platform.SENSOR, Platform.SWITCH, Platform.UPDATE]
 
@@ -28,7 +34,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     session = async_get_clientsession(hass)
     api = ArcaneAPI(host, api_key, env_id, session)
 
-    coordinator = ArcaneDataUpdateCoordinator(hass, api)
+    coordinator = ArcaneDataUpdateCoordinator(hass, api, entry.entry_id)
 
     try:
         await coordinator.async_config_entry_first_refresh()
@@ -51,8 +57,9 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 
 class ArcaneDataUpdateCoordinator(DataUpdateCoordinator):
-    def __init__(self, hass: HomeAssistant, api: ArcaneAPI) -> None:
+    def __init__(self, hass: HomeAssistant, api: ArcaneAPI, entry_id: str) -> None:
         self.api = api
+        self.entry_id = entry_id
         super().__init__(
             hass,
             _LOGGER,
@@ -67,12 +74,13 @@ class ArcaneDataUpdateCoordinator(DataUpdateCoordinator):
             containers = containers_response.get("data", [])
             data = {container["id"]: container for container in containers}
 
-            # Check for new containers
             new_ids = set(data.keys()) - self.known_container_ids
             if new_ids and self.known_container_ids:
                 self.known_container_ids.update(new_ids)
                 async_dispatcher_send(
-                    self.hass, f"{SIGNAL_NEW_CONTAINERS}_{self.config_entry.entry_id}"
+                    self.hass,
+                    f"{SIGNAL_NEW_CONTAINERS}_{self.entry_id}",
+                    new_ids,
                 )
             elif not self.known_container_ids:
                 self.known_container_ids.update(new_ids)
