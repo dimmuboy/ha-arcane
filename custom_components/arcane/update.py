@@ -28,6 +28,7 @@ async def async_setup_entry(
 ) -> None:
     """Set up Update entities for Arcane containers."""
     coordinator: ArcaneDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]
+    tracked_keys: set[str] = set()
 
     def async_add_container_updates(ids: set[str] | None = None) -> None:
         """Add update entities for new containers."""
@@ -36,7 +37,13 @@ async def async_setup_entry(
 
         entities = []
         for container_id in ids:
-            entities.append(ArcaneUpdateEntity(coordinator, container_id))
+            container = coordinator.data.get(container_id)
+            container_key = _container_key(container, container_id)
+            if container_key in tracked_keys:
+                continue
+
+            tracked_keys.add(container_key)
+            entities.append(ArcaneUpdateEntity(coordinator, container_id, container_key))
 
         if entities:
             async_add_entities(entities)
@@ -60,6 +67,22 @@ def _first_value(*values: Any) -> str | None:
     return None
 
 
+def _container_name(container: dict[str, Any] | None, fallback: str) -> str:
+    """Return a stable, readable container name."""
+    if container:
+        names = container.get("names")
+        if isinstance(names, list) and names:
+            name = names[0]
+            if isinstance(name, str) and name.strip():
+                return name.strip().lstrip("/")
+    return fallback
+
+
+def _container_key(container: dict[str, Any] | None, fallback: str) -> str:
+    """Return the stable key used to track a redeployed container."""
+    return _container_name(container, fallback)
+
+
 class ArcaneUpdateEntity(CoordinatorEntity, UpdateEntity):
     """Update entity for Docker containers managed via Arcane."""
 
@@ -67,10 +90,14 @@ class ArcaneUpdateEntity(CoordinatorEntity, UpdateEntity):
         self,
         coordinator: ArcaneDataUpdateCoordinator,
         container_id: str,
+        container_key: str,
     ) -> None:
         super().__init__(coordinator)
         self._container_id = container_id
-        self._attr_unique_id = f"{container_id}_update"
+        self._container_key = container_key
+        self._last_installed_version: str | None = None
+        self._last_latest_version: str | None = None
+        self._attr_unique_id = f"{container_key}_update"
         self._attr_has_entity_name = True
         self._attr_name = "Update"
         self._attr_icon = "mdi:download"
@@ -78,7 +105,16 @@ class ArcaneUpdateEntity(CoordinatorEntity, UpdateEntity):
     @property
     def _container(self) -> dict[str, Any] | None:
         """Return the current container payload from Arcane."""
-        return self.coordinator.data.get(self._container_id)
+        container = self.coordinator.data.get(self._container_id)
+        if container is not None:
+            return container
+
+        for candidate_id, candidate in self.coordinator.data.items():
+            if _container_key(candidate, candidate_id) == self._container_key:
+                self._container_id = candidate_id
+                return candidate
+
+        return None
 
     @property
     def _update_info(self) -> dict[str, Any]:
@@ -114,8 +150,8 @@ class ArcaneUpdateEntity(CoordinatorEntity, UpdateEntity):
         """Return device information."""
         container = self._container or {}
         return {
-            "identifiers": {(DOMAIN, self._container_id)},
-            "name": container.get("names", [self._container_id])[0].lstrip("/"),
+            "identifiers": {(DOMAIN, self._container_key)},
+            "name": self._container_name(),
             "manufacturer": "Arcane",
             "model": "Container",
             "sw_version": self.installed_version,
@@ -125,29 +161,30 @@ class ArcaneUpdateEntity(CoordinatorEntity, UpdateEntity):
     def installed_version(self) -> str | None:
         """Return Arcane's current image version or digest."""
         container = self._container
-        if container is None:
-            return None
-
         update_info = self._update_info
-        return _first_value(
+        version = _first_value(
             update_info.get("currentVersion"),
             update_info.get("currentDigest"),
-            container.get("image"),
+            container.get("image") if container else None,
         )
+        if version:
+            self._last_installed_version = version
+            return version
+        return self._last_installed_version
 
     @property
     def latest_version(self) -> str | None:
         """Return Arcane's latest available image version or digest."""
-        container = self._container
-        if container is None:
-            return None
-
         update_info = self._update_info
-        return _first_value(
+        version = _first_value(
             update_info.get("latestVersion"),
             update_info.get("latestDigest"),
             self.installed_version,
         )
+        if version:
+            self._last_latest_version = version
+            return version
+        return self._last_latest_version or self.installed_version
 
     @property
     def release_url(self) -> str | None:
@@ -156,16 +193,13 @@ class ArcaneUpdateEntity(CoordinatorEntity, UpdateEntity):
 
     def _container_name(self, fallback: str | None = None) -> str:
         """Return a readable container name."""
-        container = self._container
-        if container:
-            return container.get("names", [self._container_id])[0].lstrip("/")
-        return fallback or self._container_id
+        return _container_name(self._container, fallback or self._container_key)
 
     def _redeploy_confirmed(self, target_version: str | None) -> bool:
         """Return whether Arcane data shows the update is no longer pending."""
         container = self._container
         if container is None:
-            return True
+            return False
 
         update_info = self._update_info
         if update_info and not update_info.get("hasUpdate", False):
@@ -199,7 +233,7 @@ class ArcaneUpdateEntity(CoordinatorEntity, UpdateEntity):
         """Install an update by redeploying the container in Arcane."""
         container = self._container
         if not container:
-            raise HomeAssistantError(f"Container {self._container_id} not found")
+            raise HomeAssistantError(f"Container {self._container_key} not found")
 
         container_name = self._container_name()
         if self._redeploy_disabled:
