@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -15,6 +16,9 @@ from .__init__ import ArcaneDataUpdateCoordinator
 from .const import DOMAIN, SIGNAL_NEW_CONTAINERS
 
 _LOGGER = logging.getLogger(__name__)
+
+REDEPLOY_POLL_ATTEMPTS = 30
+REDEPLOY_POLL_DELAY = 5
 
 
 async def async_setup_entry(
@@ -48,6 +52,14 @@ async def async_setup_entry(
     )
 
 
+def _first_value(*values: Any) -> str | None:
+    """Return the first non-empty string value."""
+    for value in values:
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
 class ArcaneUpdateEntity(CoordinatorEntity, UpdateEntity):
     """Update entity for Docker containers managed via Arcane."""
 
@@ -67,6 +79,17 @@ class ArcaneUpdateEntity(CoordinatorEntity, UpdateEntity):
     def _container(self) -> dict[str, Any] | None:
         """Return the current container payload from Arcane."""
         return self.coordinator.data.get(self._container_id)
+
+    @property
+    def _update_info(self) -> dict[str, Any]:
+        """Return Arcane image update metadata for this container."""
+        container = self._container
+        if not container:
+            return {}
+        update_info = container.get("updateInfo")
+        if isinstance(update_info, dict):
+            return update_info
+        return {}
 
     @property
     def _redeploy_disabled(self) -> bool:
@@ -95,36 +118,80 @@ class ArcaneUpdateEntity(CoordinatorEntity, UpdateEntity):
             "name": container.get("names", [self._container_id])[0].lstrip("/"),
             "manufacturer": "Arcane",
             "model": "Container",
-            "sw_version": container.get("image"),
+            "sw_version": self.installed_version,
         }
 
     @property
     def installed_version(self) -> str | None:
-        """Return the currently installed image reference."""
+        """Return Arcane's current image version or digest."""
         container = self._container
         if container is None:
             return None
-        return container.get("image")
+
+        update_info = self._update_info
+        return _first_value(
+            update_info.get("currentVersion"),
+            update_info.get("currentDigest"),
+            container.get("image"),
+        )
 
     @property
     def latest_version(self) -> str | None:
-        """Return the latest available image version or digest."""
+        """Return Arcane's latest available image version or digest."""
         container = self._container
         if container is None:
             return None
 
-        update_info = container.get("updateInfo")
-        if update_info and update_info.get("hasUpdate"):
-            latest = update_info.get("latestVersion") or update_info.get("latestDigest")
-            if latest:
-                return latest
-
-        return self.installed_version
+        update_info = self._update_info
+        return _first_value(
+            update_info.get("latestVersion"),
+            update_info.get("latestDigest"),
+            self.installed_version,
+        )
 
     @property
     def release_url(self) -> str | None:
         """Return the URL to the release notes."""
         return None
+
+    def _container_name(self, fallback: str | None = None) -> str:
+        """Return a readable container name."""
+        container = self._container
+        if container:
+            return container.get("names", [self._container_id])[0].lstrip("/")
+        return fallback or self._container_id
+
+    def _redeploy_confirmed(self, target_version: str | None) -> bool:
+        """Return whether Arcane data shows the update is no longer pending."""
+        container = self._container
+        if container is None:
+            return True
+
+        update_info = self._update_info
+        if update_info and not update_info.get("hasUpdate", False):
+            return True
+
+        if target_version and self.installed_version == target_version:
+            return True
+
+        return False
+
+    async def _async_wait_for_redeploy(self, target_version: str | None) -> None:
+        """Poll Arcane until the redeploy result is visible to Home Assistant."""
+        for attempt in range(1, REDEPLOY_POLL_ATTEMPTS + 1):
+            await self.coordinator.async_request_refresh()
+            if self._redeploy_confirmed(target_version):
+                _LOGGER.info(
+                    "Confirmed redeploy for container '%s' after %d poll(s)",
+                    self._container_name(),
+                    attempt,
+                )
+                return
+            await asyncio.sleep(REDEPLOY_POLL_DELAY)
+
+        raise HomeAssistantError(
+            f"Timed out waiting for Arcane to confirm redeploy for container '{self._container_name()}'"
+        )
 
     async def async_install(
         self, version: str | None = None, backup: bool = True, **kwargs: Any
@@ -134,12 +201,13 @@ class ArcaneUpdateEntity(CoordinatorEntity, UpdateEntity):
         if not container:
             raise HomeAssistantError(f"Container {self._container_id} not found")
 
-        container_name = container.get("names", [self._container_id])[0].lstrip("/")
+        container_name = self._container_name()
         if self._redeploy_disabled:
             raise HomeAssistantError(
                 f"Arcane does not allow redeploying container '{container_name}'"
             )
 
+        target_version = version or self.latest_version
         _LOGGER.info(
             "Installing update for container '%s' (%s) via Arcane redeploy",
             container_name,
@@ -149,11 +217,12 @@ class ArcaneUpdateEntity(CoordinatorEntity, UpdateEntity):
         try:
             result = await self.coordinator.api.redeploy_container(self._container_id)
             _LOGGER.info(
-                "Successfully initiated redeploy for container '%s': %s",
+                "Arcane accepted redeploy for container '%s': %s",
                 container_name,
                 result,
             )
-            await self.coordinator.async_request_refresh()
+            await self._async_wait_for_redeploy(target_version)
+            _LOGGER.info("Container '%s' update completed successfully", container_name)
         except Exception as err:
             error_msg = f"Failed to redeploy container '{container_name}': {err}"
             _LOGGER.error(error_msg, exc_info=True)
