@@ -35,6 +35,18 @@ async def async_setup_entry(
             async_add_entities(entities)
 
     add_buttons()
+
+    project_buttons = []
+    for key in coordinator.data.get("projects", {}):
+        project_buttons.extend(
+            (
+                ArcaneProjectButton(coordinator, key, "restart"),
+                ArcaneProjectButton(coordinator, key, "redeploy"),
+            )
+        )
+    if project_buttons:
+        async_add_entities(project_buttons)
+
     entry.async_on_unload(
         async_dispatcher_connect(
             hass,
