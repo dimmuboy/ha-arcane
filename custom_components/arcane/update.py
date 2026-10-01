@@ -12,6 +12,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import ArcaneDataUpdateCoordinator
 from .const import DOMAIN, SIGNAL_NEW_CONTAINERS, SIGNAL_NEW_PROJECTS
+from .entity_helpers import container_device_info
 
 
 async def async_setup_entry(
@@ -109,23 +110,7 @@ class ArcaneUpdateEntity(CoordinatorEntity, UpdateEntity):
 
     @property
     def device_info(self) -> dict[str, Any]:
-        container = self._container or {}
-        environment_id = container.get("_environment_id", "unknown")
-        environment_name = container.get("_environment_name", environment_id)
-        names = container.get("names", [])
-        name = (
-            names[0].lstrip("/")
-            if isinstance(names, list) and names and isinstance(names[0], str)
-            else self._container_key
-        )
-        return {
-            "identifiers": {(DOMAIN, self._container_key)},
-            "name": name,
-            "manufacturer": "Arcane",
-            "model": f"Container · {environment_name}",
-            "sw_version": self.installed_version,
-            "via_device": (DOMAIN, f"environment:{environment_id}"),
-        }
+        return container_device_info(self._container or {})
 
     @property
     def installed_version(self) -> str | None:
