@@ -1,0 +1,43 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect to Arcane",
+        "description": "Enter the connection details for your Arcane Manager.",
+        "data": {
+          "host": "Host",
+          "api_key": "API Key"
+        }
+      },
+      "environment": {
+        "title": "Select environment",
+        "description": "Choose the Arcane environment to add as a separate Home Assistant hub.",
+        "data": {
+          "env_id": "Environment"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect",
+      "invalid_auth": "Invalid authentication",
+      "no_environments": "No environments are available to this API key",
+      "unknown": "Unexpected error"
+    },
+    "abort": {
+      "already_configured": "This Arcane environment is already configured",
+      "environment_unavailable": "The selected environment is no longer available",
+      "setup_expired": "Setup data expired. Start the integration setup again."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Arcane options",
+        "description": "Configure how often Arcane data is refreshed.",
+        "data": {
+          "scan_interval": "Polling interval (seconds)"
+        }
+      }
+    }
+  }
+}
