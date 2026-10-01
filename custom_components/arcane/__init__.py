@@ -221,6 +221,12 @@ class ArcaneDataUpdateCoordinator(DataUpdateCoordinator):
                     err,
                 )
 
+            project_keys_by_compose_name: dict[str, str] = {}
+            for project_key, project in projects.items():
+                project_name = project.get("name")
+                if isinstance(project_name, str) and project_name:
+                    project_keys_by_compose_name[project_name] = project_key
+
             containers: dict[str, dict[str, Any]] = {}
             try:
                 response = await self.api.get_containers(self.environment_id)
@@ -244,11 +250,24 @@ class ArcaneDataUpdateCoordinator(DataUpdateCoordinator):
                     if isinstance(names, list) and names and isinstance(names[0], str)
                     else container_id
                 )
+                labels = container.get("labels")
+                compose_project = (
+                    labels.get("com.docker.compose.project")
+                    if isinstance(labels, dict)
+                    else None
+                )
+                project_key = (
+                    project_keys_by_compose_name.get(compose_project)
+                    if isinstance(compose_project, str)
+                    else None
+                )
+
                 key = container_key(self.environment_id, container_name)
                 containers[key] = {
                     **container,
                     "_environment_id": self.environment_id,
                     "_environment_name": environment_data["_environment_name"],
+                    "_project_key": project_key,
                 }
 
             new_project_keys = set(projects) - self.known_project_keys
