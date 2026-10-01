@@ -1,19 +1,16 @@
 from __future__ import annotations
 
-import logging
 from typing import Any
 
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
+from . import ArcaneDataUpdateCoordinator
 from .const import DOMAIN, SIGNAL_NEW_CONTAINERS
-from .__init__ import ArcaneDataUpdateCoordinator
-from homeassistant.helpers.dispatcher import async_dispatcher_connect
-
-_LOGGER = logging.getLogger(__name__)
 
 
 async def async_setup_entry(
@@ -23,63 +20,64 @@ async def async_setup_entry(
 ) -> None:
     coordinator: ArcaneDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]
 
-    def async_add_container_switches(ids: set[str] | None = None) -> None:
-        """Add switches for new containers."""
-        if ids is None:
-            ids = set(coordinator.data.keys())
+    def add_container_switches(keys: set[str] | None = None) -> None:
+        if keys is None:
+            keys = set(coordinator.data["containers"])
+        async_add_entities(ArcaneContainerSwitch(coordinator, key) for key in keys)
 
-        entities = []
-        for container_id in ids:
-            entities.append(ArcaneContainerSwitch(coordinator, container_id))
-
-        if entities:
-            async_add_entities(entities)
-
-    # Add initial switches
-    async_add_container_switches()
-
-    # Listen for new containers
+    add_container_switches()
     entry.async_on_unload(
         async_dispatcher_connect(
             hass,
             f"{SIGNAL_NEW_CONTAINERS}_{entry.entry_id}",
-            async_add_container_switches,
+            add_container_switches,
         )
     )
 
 
 class ArcaneContainerSwitch(CoordinatorEntity, SwitchEntity):
-    def __init__(self, coordinator: ArcaneDataUpdateCoordinator, container_id: str) -> None:
+    def __init__(
+        self, coordinator: ArcaneDataUpdateCoordinator, container_key: str
+    ) -> None:
         super().__init__(coordinator)
-        self._container_id = container_id
-        self._attr_unique_id = f"{container_id}_switch"
+        self._container_key = container_key
+        self._attr_unique_id = f"{container_key}_switch"
         self._attr_has_entity_name = True
         self._attr_name = "Running"
         self._attr_icon = "mdi:docker"
-        self._api = coordinator.api
+
+    @property
+    def _container(self) -> dict[str, Any]:
+        return self.coordinator.data["containers"].get(self._container_key, {})
 
     @property
     def device_info(self) -> dict[str, Any]:
-        container = self.coordinator.data.get(self._container_id, {})
+        container = self._container
+        environment_id = container.get("_environment_id", "unknown")
+        environment_name = container.get("_environment_name", environment_id)
+        name = container.get("names", [self._container_key])[0].lstrip("/")
         return {
-            "identifiers": {(DOMAIN, self._container_id)},
-            "name": container.get("names", [self._container_id])[0].lstrip("/"),
+            "identifiers": {(DOMAIN, self._container_key)},
+            "name": name,
             "manufacturer": "Arcane",
-            "model": "Container",
-            "sw_version": container.get("image"),
+            "model": f"Container · {environment_name}",
+            "via_device": (DOMAIN, f"environment:{environment_id}"),
         }
 
     @property
     def is_on(self) -> bool:
-        container = self.coordinator.data.get(self._container_id)
-        if container is None:
-            return False
-        return container.get("state") == "running"
+        return self._container.get("state") == "running"
 
     async def async_turn_on(self, **kwargs: Any) -> None:
-        await self._api.control_container(self._container_id, "start")
+        container = self._container
+        await self.coordinator.api.control_container(
+            container["_environment_id"], container["id"], "start"
+        )
         await self.coordinator.async_request_refresh()
 
     async def async_turn_off(self, **kwargs: Any) -> None:
-        await self._api.control_container(self._container_id, "stop")
+        container = self._container
+        await self.coordinator.api.control_container(
+            container["_environment_id"], container["id"], "stop"
+        )
         await self.coordinator.async_request_refresh()

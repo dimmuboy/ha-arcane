@@ -1,6 +1,5 @@
-import asyncio
 import logging
-from typing import Any, Dict
+from typing import Any
 
 import aiohttp
 import async_timeout
@@ -8,7 +7,6 @@ import async_timeout
 _LOGGER = logging.getLogger(__name__)
 
 TIMEOUT = 30
-REDEPLOY_TIMEOUT = 300
 
 
 class ArcaneAuthError(Exception):
@@ -20,19 +18,19 @@ class ArcaneConnectionError(Exception):
 
 
 class ArcaneAPI:
+    """Client for the Arcane Manager API."""
+
     def __init__(
         self,
         host: str,
         api_key: str,
-        env_id: str,
         session: aiohttp.ClientSession,
     ) -> None:
         self._host = host.rstrip("/")
-        if not (self._host.startswith("http://") or self._host.startswith("https://")):
+        if not self._host.startswith(("http://", "https://")):
             self._host = f"http://{self._host}"
 
         self._api_key = api_key.strip()
-        self._env_id = env_id
         self._session = session
         self._headers = {
             "X-API-Key": self._api_key,
@@ -40,86 +38,126 @@ class ArcaneAPI:
             "Accept": "application/json",
         }
 
-    async def get_containers(self) -> Dict[str, Any]:
-        url = f"{self._host}/api/environments/{self._env_id}/containers"
+    async def _request(
+        self,
+        method: str,
+        path: str,
+        *,
+        timeout: int = TIMEOUT,
+        json: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Perform an authenticated Arcane API request."""
+        url = f"{self._host}/api{path}"
         try:
-            async with async_timeout.timeout(TIMEOUT):
-                response = await self._session.get(url, headers=self._headers)
-                if response.status == 401:
-                    raise ArcaneAuthError("Invalid API Key")
+            async with async_timeout.timeout(timeout):
+                response = await self._session.request(
+                    method, url, headers=self._headers, json=json
+                )
+                if response.status in (401, 403):
+                    raise ArcaneAuthError("Invalid or insufficient Arcane API key")
                 response.raise_for_status()
-                return await response.json()
-        except aiohttp.ClientError as exception:
-            _LOGGER.error("Error fetching data from Arcane: %s", exception)
-            raise
-        except Exception as exception:
-            _LOGGER.error("Unexpected error fetching data from Arcane: %s", exception)
-            raise
 
-    async def control_container(self, container_id: str, action: str) -> None:
-        if action not in ["start", "stop", "restart"]:
-            raise ValueError(f"Invalid action: {action}")
-
-        url = f"{self._host}/api/environments/{self._env_id}/containers/{container_id}/{action}"
-        try:
-            async with async_timeout.timeout(TIMEOUT):
-                response = await self._session.post(url, headers=self._headers)
-                response.raise_for_status()
-        except aiohttp.ClientError as exception:
-            _LOGGER.error("Error controlling container %s: %s", container_id, exception)
-            raise
-        except Exception as exception:
-            _LOGGER.error(
-                "Unexpected error controlling container %s: %s", container_id, exception
-            )
-            raise
-
-    async def redeploy_container(self, container_id: str) -> Dict[str, Any]:
-        """Redeploy container by asking Arcane to pull the latest image and recreate it."""
-        url = f"{self._host}/api/environments/{self._env_id}/containers/{container_id}/redeploy"
-        try:
-            _LOGGER.info("Starting redeploy for container %s", container_id)
-            _LOGGER.debug("Redeploy URL: %s", url)
-
-            async with async_timeout.timeout(REDEPLOY_TIMEOUT):
-                response = await self._session.post(url, headers=self._headers)
-
-                _LOGGER.info("Redeploy response status: %d", response.status)
-                _LOGGER.debug("Response headers: %s", response.headers)
-
-                if response.status == 401:
-                    error_text = await response.text()
-                    _LOGGER.error("Authentication failed: %s", error_text)
-                    raise ArcaneAuthError("Invalid API Key")
-
-                if response.status >= 400:
-                    error_text = await response.text()
-                    _LOGGER.error(
-                        "Redeploy failed with status %d: %s",
-                        response.status,
-                        error_text,
-                    )
-                    raise Exception(f"HTTP {response.status}: {error_text}")
-
-                try:
-                    result = await response.json()
-                    _LOGGER.info("Redeploy successful, response: %s", result)
-                    return result
-                except (aiohttp.ContentTypeError, ValueError) as e:
-                    _LOGGER.debug("Non-JSON response from redeploy endpoint: %s", e)
+                if response.status == 204:
                     return {"success": True}
 
-        except asyncio.TimeoutError as e:
-            error_msg = f"Redeploy timeout (exceeded {REDEPLOY_TIMEOUT}s)"
-            _LOGGER.error(error_msg)
-            raise Exception(error_msg) from e
-        except aiohttp.ClientError as e:
-            error_msg = f"Client error during redeploy: {type(e).__name__}: {e}"
-            _LOGGER.error(error_msg)
-            raise Exception(error_msg) from e
+                try:
+                    return await response.json()
+                except (aiohttp.ContentTypeError, ValueError):
+                    return {"success": True}
         except ArcaneAuthError:
             raise
-        except Exception as e:
-            error_msg = f"Unexpected error redeploying container {container_id}: {type(e).__name__}: {e}"
-            _LOGGER.error(error_msg, exc_info=True)
-            raise Exception(error_msg) from e
+        except (aiohttp.ClientError, TimeoutError) as exception:
+            raise ArcaneConnectionError(
+                f"Error communicating with Arcane at {url}: {exception}"
+            ) from exception
+
+    async def get_environments(self) -> dict[str, Any]:
+        """Return all environments visible to the API key."""
+        return await self._request("GET", "/environments?start=0&limit=100")
+
+    async def get_containers(self, environment_id: str) -> dict[str, Any]:
+        """Return containers for an environment."""
+        return await self._request(
+            "GET",
+            f"/environments/{environment_id}/containers?start=0&limit=100",
+        )
+
+    async def get_docker_info(self, environment_id: str) -> dict[str, Any]:
+        """Return Docker daemon information for an environment."""
+        return await self._request(
+            "GET", f"/environments/{environment_id}/system/docker/info"
+        )
+
+    async def get_vulnerabilities(
+        self, environment_id: str, severity: str | None = None
+    ) -> dict[str, Any]:
+        """Return environment vulnerabilities."""
+        path = (
+            f"/environments/{environment_id}/vulnerabilities/all?start=0&limit=1"
+        )
+        if severity:
+            path += f"&severity={severity}"
+        return await self._request("GET", path)
+
+    async def get_projects(self, environment_id: str) -> dict[str, Any]:
+        """Return Compose projects for an environment."""
+        return await self._request(
+            "GET",
+            f"/environments/{environment_id}/projects?start=0&limit=100",
+        )
+
+    async def control_project(
+        self, environment_id: str, project_id: str, action: str
+    ) -> dict[str, Any]:
+        """Run a supported Compose project action."""
+        if action not in {"restart", "redeploy"}:
+            raise ValueError(f"Invalid project action: {action}")
+
+        return await self._request(
+            "POST",
+            f"/environments/{environment_id}/projects/{project_id}/{action}",
+            timeout=300,
+        )
+
+    async def update_project(
+        self, environment_id: str, project_id: str
+    ) -> dict[str, Any]:
+        """Pull latest images and recreate all services in a project."""
+        return await self._request(
+            "POST",
+            f"/environments/{environment_id}/projects/{project_id}/update-services",
+            timeout=300,
+            json={},
+        )
+
+    async def control_container(
+        self, environment_id: str, container_id: str, action: str
+    ) -> None:
+        """Start, stop, or restart a container."""
+        if action not in {"start", "stop", "restart"}:
+            raise ValueError(f"Invalid action: {action}")
+
+        await self._request(
+            "POST",
+            f"/environments/{environment_id}/containers/{container_id}/{action}",
+        )
+
+    async def update_container(
+        self, environment_id: str, container_id: str
+    ) -> dict[str, Any]:
+        """Update a container using Arcane's updater strategy."""
+        return await self._request(
+            "POST",
+            f"/environments/{environment_id}/containers/{container_id}/update",
+            timeout=300,
+        )
+
+    async def redeploy_container(
+        self, environment_id: str, container_id: str
+    ) -> dict[str, Any]:
+        """Pull the latest image and recreate a container."""
+        return await self._request(
+            "POST",
+            f"/environments/{environment_id}/containers/{container_id}/redeploy",
+            timeout=300,
+        )

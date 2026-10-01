@@ -3,11 +3,10 @@
     "step": {
       "user": {
         "title": "Connect to Arcane",
-        "description": "Please enter the connection details for your Arcane instance.",
+        "description": "Enter the connection details for your Arcane Manager. All environments visible to this API key will be discovered automatically.",
         "data": {
           "host": "Host",
-          "api_key": "API Key",
-          "env_id": "Environment ID"
+          "api_key": "API Key"
         }
       }
     },
@@ -17,7 +16,18 @@
       "unknown": "Unexpected error"
     },
     "abort": {
-      "already_configured": "Device is already configured"
+      "already_configured": "This Arcane Manager is already configured"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Arcane options",
+        "description": "Configure how often Arcane data is refreshed.",
+        "data": {
+          "scan_interval": "Polling interval (seconds)"
+        }
+      }
     }
   }
 }
