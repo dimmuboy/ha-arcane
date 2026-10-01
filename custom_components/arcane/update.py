@@ -142,3 +142,63 @@ class ArcaneUpdateEntity(CoordinatorEntity, UpdateEntity):
             raise HomeAssistantError(
                 f"Failed to update container {self._container_key}: {err}"
             ) from err
+
+
+
+class ArcaneProjectUpdateEntity(CoordinatorEntity, UpdateEntity):
+    """Update entity for an Arcane Compose project."""
+
+    def __init__(
+        self, coordinator: ArcaneDataUpdateCoordinator, project_key: str
+    ) -> None:
+        super().__init__(coordinator)
+        self._project_key = project_key
+        self._attr_unique_id = f"project:{project_key}_update"
+        self._attr_has_entity_name = True
+        self._attr_name = "Update"
+        self._attr_icon = "mdi:download"
+
+    @property
+    def _project(self) -> dict[str, Any]:
+        return self.coordinator.data.get("projects", {}).get(self._project_key, {})
+
+    @property
+    def supported_features(self) -> UpdateEntityFeature:
+        return UpdateEntityFeature.INSTALL
+
+    @property
+    def device_info(self) -> dict[str, Any]:
+        project = self._project
+        environment_id = project.get("_environment_id", "unknown")
+        return {
+            "identifiers": {(DOMAIN, f"project:{self._project_key}")},
+            "name": project.get("name", self._project_key),
+            "manufacturer": "Arcane",
+            "model": "Docker Compose Project",
+            "via_device": (DOMAIN, f"environment:{environment_id}"),
+        }
+
+    @property
+    def installed_version(self) -> str:
+        return "Current"
+
+    @property
+    def latest_version(self) -> str:
+        info = self._project.get("updateInfo")
+        if isinstance(info, dict) and info.get("hasUpdate"):
+            count = info.get("imagesWithUpdates", 1)
+            return f"{count} update(s) available"
+        return "Current"
+
+    async def async_install(
+        self, version: str | None = None, backup: bool = True, **kwargs: Any
+    ) -> None:
+        project = self._project
+        if not project:
+            raise HomeAssistantError(
+                f"Project {self._project_key} is not available"
+            )
+        await self.coordinator.api.update_project(
+            project["_environment_id"], project["id"]
+        )
+        await self.coordinator.async_request_refresh()
