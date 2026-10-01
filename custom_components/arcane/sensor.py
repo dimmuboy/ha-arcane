@@ -10,7 +10,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import ArcaneDataUpdateCoordinator
-from .const import DOMAIN, SIGNAL_NEW_CONTAINERS
+from .const import DOMAIN, SIGNAL_NEW_CONTAINERS, SIGNAL_NEW_PROJECTS
 
 
 async def async_setup_entry(
@@ -57,24 +57,36 @@ async def async_setup_entry(
 
     add_container_sensors()
 
-    project_entities = []
-    for key in coordinator.data.get("projects", {}):
-        project_entities.extend(
-            (
-                ArcaneProjectSensor(coordinator, key, "Status"),
-                ArcaneProjectSensor(coordinator, key, "Services"),
-                ArcaneProjectSensor(coordinator, key, "Running services"),
-                ArcaneProjectSensor(coordinator, key, "Updates available"),
+    def add_project_sensors(keys: set[str] | None = None) -> None:
+        if keys is None:
+            keys = set(coordinator.data.get("projects", {}))
+        entities = []
+        for key in keys:
+            entities.extend(
+                (
+                    ArcaneProjectSensor(coordinator, key, "Status"),
+                    ArcaneProjectSensor(coordinator, key, "Services"),
+                    ArcaneProjectSensor(coordinator, key, "Running services"),
+                    ArcaneProjectSensor(coordinator, key, "Updates available"),
+                )
             )
-        )
-    if project_entities:
-        async_add_entities(project_entities)
+        if entities:
+            async_add_entities(entities)
+
+    add_project_sensors()
 
     entry.async_on_unload(
         async_dispatcher_connect(
             hass,
             f"{SIGNAL_NEW_CONTAINERS}_{entry.entry_id}",
             add_container_sensors,
+        )
+    )
+    entry.async_on_unload(
+        async_dispatcher_connect(
+            hass,
+            f"{SIGNAL_NEW_PROJECTS}_{entry.entry_id}",
+            add_project_sensors,
         )
     )
 
