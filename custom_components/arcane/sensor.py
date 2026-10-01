@@ -105,9 +105,9 @@ class ArcaneSensor(CoordinatorEntity, SensorEntity):
         icons = {
             "State": "mdi:docker",
             "Image": "mdi:image",
-         }
+        }
         self._attr_icon = icons.get(sensor_type, "mdi:docker")
- 
+
     @property
     def _container(self) -> dict[str, Any]:
         return self.coordinator.data["containers"].get(self._container_key, {})
@@ -133,7 +133,7 @@ class ArcaneSensor(CoordinatorEntity, SensorEntity):
             return container.get("state")
         if self._sensor_type == "Image":
             return container.get("image")
-         return None
+        return None
 
 
 
