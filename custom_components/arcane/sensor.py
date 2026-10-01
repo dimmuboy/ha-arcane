@@ -48,9 +48,6 @@ async def async_setup_entry(
                 (
                     ArcaneSensor(coordinator, key, "State"),
                     ArcaneSensor(coordinator, key, "Image"),
-                    ArcaneSensor(coordinator, key, "CPU"),
-                    ArcaneSensor(coordinator, key, "Memory"),
-                    ArcaneSensor(coordinator, key, "Memory limit"),
                 )
             )
         if entities:
@@ -108,19 +105,22 @@ class ArcaneSensor(CoordinatorEntity, SensorEntity):
         icons = {
             "State": "mdi:docker",
             "Image": "mdi:image",
-            "CPU": "mdi:cpu-64-bit",
-            "Memory": "mdi:memory",
-            "Memory limit": "mdi:memory",
-        }
+         }
         self._attr_icon = icons.get(sensor_type, "mdi:docker")
-        if sensor_type == "CPU":
-            self._attr_native_unit_of_measurement = "%"
-        elif sensor_type in {"Memory", "Memory limit"}:
-            self._attr_native_unit_of_measurement = "MiB"
-
+ 
     @property
     def _container(self) -> dict[str, Any]:
         return self.coordinator.data["containers"].get(self._container_key, {})
+
+    @property
+    def name(self) -> str:
+        names = self._container.get("names", [])
+        container_name = (
+            names[0].lstrip("/")
+            if isinstance(names, list) and names and isinstance(names[0], str)
+            else self._container_key.split(":", 1)[-1]
+        )
+        return f"{container_name} · {self._sensor_type}"
 
     @property
     def device_info(self) -> dict[str, Any]:
@@ -133,16 +133,7 @@ class ArcaneSensor(CoordinatorEntity, SensorEntity):
             return container.get("state")
         if self._sensor_type == "Image":
             return container.get("image")
-        sample = container.get("resourceSample")
-        if not isinstance(sample, dict):
-            return None
-        if self._sensor_type == "CPU":
-            return round(sample.get("cpuPercent", 0), 2)
-        if self._sensor_type == "Memory":
-            return round(sample.get("memoryUsageBytes", 0) / 1048576, 1)
-        if self._sensor_type == "Memory limit":
-            return round(sample.get("memoryLimitBytes", 0) / 1048576, 1)
-        return None
+         return None
 
 
 
