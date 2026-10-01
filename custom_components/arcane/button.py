@@ -10,7 +10,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import ArcaneDataUpdateCoordinator
-from .const import DOMAIN, SIGNAL_NEW_CONTAINERS
+from .const import DOMAIN, SIGNAL_NEW_CONTAINERS, SIGNAL_NEW_PROJECTS
 
 
 async def async_setup_entry(
@@ -36,22 +36,34 @@ async def async_setup_entry(
 
     add_buttons()
 
-    project_buttons = []
-    for key in coordinator.data.get("projects", {}):
-        project_buttons.extend(
-            (
-                ArcaneProjectButton(coordinator, key, "restart"),
-                ArcaneProjectButton(coordinator, key, "redeploy"),
+    def add_project_buttons(keys: set[str] | None = None) -> None:
+        if keys is None:
+            keys = set(coordinator.data.get("projects", {}))
+        entities = []
+        for key in keys:
+            entities.extend(
+                (
+                    ArcaneProjectButton(coordinator, key, "restart"),
+                    ArcaneProjectButton(coordinator, key, "redeploy"),
+                )
             )
-        )
-    if project_buttons:
-        async_add_entities(project_buttons)
+        if entities:
+            async_add_entities(entities)
+
+    add_project_buttons()
 
     entry.async_on_unload(
         async_dispatcher_connect(
             hass,
             f"{SIGNAL_NEW_CONTAINERS}_{entry.entry_id}",
             add_buttons,
+        )
+    )
+    entry.async_on_unload(
+        async_dispatcher_connect(
+            hass,
+            f"{SIGNAL_NEW_PROJECTS}_{entry.entry_id}",
+            add_project_buttons,
         )
     )
 
