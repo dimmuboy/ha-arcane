@@ -91,6 +91,16 @@ class ArcaneContainerButton(CoordinatorEntity, ButtonEntity):
         return self.coordinator.data["containers"].get(self._container_key, {})
 
     @property
+    def name(self) -> str:
+        names = self._container.get("names", [])
+        container_name = (
+            names[0].lstrip("/")
+            if isinstance(names, list) and names and isinstance(names[0], str)
+            else self._container_key.split(":", 1)[-1]
+        )
+        return f"{container_name} · {self._action.title()}"
+
+    @property
     def device_info(self) -> dict[str, Any]:
         return container_device_info(self._container)
 
