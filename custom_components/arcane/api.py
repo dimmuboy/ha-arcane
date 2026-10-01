@@ -39,14 +39,19 @@ class ArcaneAPI:
         }
 
     async def _request(
-        self, method: str, path: str, *, timeout: int = TIMEOUT
+        self,
+        method: str,
+        path: str,
+        *,
+        timeout: int = TIMEOUT,
+        json: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Perform an authenticated Arcane API request."""
         url = f"{self._host}/api{path}"
         try:
             async with async_timeout.timeout(timeout):
                 response = await self._session.request(
-                    method, url, headers=self._headers
+                    method, url, headers=self._headers, json=json
                 )
                 if response.status in (401, 403):
                     raise ArcaneAuthError("Invalid or insufficient Arcane API key")
