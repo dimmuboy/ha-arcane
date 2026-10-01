@@ -36,6 +36,20 @@ async def async_setup_entry(
             async_add_entities(entities)
 
     add_container_sensors()
+
+    project_entities = []
+    for key in coordinator.data.get("projects", {}):
+        project_entities.extend(
+            (
+                ArcaneProjectSensor(coordinator, key, "Status"),
+                ArcaneProjectSensor(coordinator, key, "Services"),
+                ArcaneProjectSensor(coordinator, key, "Running services"),
+                ArcaneProjectSensor(coordinator, key, "Updates available"),
+            )
+        )
+    if project_entities:
+        async_add_entities(project_entities)
+
     entry.async_on_unload(
         async_dispatcher_connect(
             hass,
@@ -132,3 +146,53 @@ class ArcaneEnvironmentSensor(CoordinatorEntity, SensorEntity):
         if self._sensor_type == "Running":
             return sum(container.get("state") == "running" for container in containers)
         return sum(container.get("state") != "running" for container in containers)
+
+
+
+class ArcaneProjectSensor(CoordinatorEntity, SensorEntity):
+    """Sensor for an Arcane Compose project."""
+
+    def __init__(
+        self,
+        coordinator: ArcaneDataUpdateCoordinator,
+        project_key: str,
+        sensor_type: str,
+    ) -> None:
+        super().__init__(coordinator)
+        self._project_key = project_key
+        self._sensor_type = sensor_type
+        slug = sensor_type.lower().replace(" ", "_")
+        self._attr_unique_id = f"project:{project_key}_{slug}"
+        self._attr_has_entity_name = True
+        self._attr_name = sensor_type
+        self._attr_icon = "mdi:docker"
+
+    @property
+    def _project(self) -> dict[str, Any]:
+        return self.coordinator.data.get("projects", {}).get(self._project_key, {})
+
+    @property
+    def device_info(self) -> dict[str, Any]:
+        project = self._project
+        environment_id = project.get("_environment_id", "unknown")
+        return {
+            "identifiers": {(DOMAIN, f"project:{self._project_key}")},
+            "name": project.get("name", self._project_key),
+            "manufacturer": "Arcane",
+            "model": "Docker Compose Project",
+            "via_device": (DOMAIN, f"environment:{environment_id}"),
+        }
+
+    @property
+    def native_value(self) -> str | int | None:
+        project = self._project
+        if self._sensor_type == "Status":
+            return project.get("status")
+        if self._sensor_type == "Services":
+            return project.get("serviceCount")
+        if self._sensor_type == "Running services":
+            return project.get("runningCount")
+        update_info = project.get("updateInfo")
+        if isinstance(update_info, dict):
+            return update_info.get("imagesWithUpdates", 0)
+        return 0
