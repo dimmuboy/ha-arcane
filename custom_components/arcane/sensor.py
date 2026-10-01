@@ -86,3 +86,49 @@ class ArcaneSensor(CoordinatorEntity, SensorEntity):
         if self._sensor_type == "Image":
             return container.get("image")
         return None
+
+
+
+class ArcaneEnvironmentSensor(CoordinatorEntity, SensorEntity):
+    """Summary sensor for an Arcane environment."""
+
+    def __init__(
+        self,
+        coordinator: ArcaneDataUpdateCoordinator,
+        environment_id: str,
+        sensor_type: str,
+    ) -> None:
+        super().__init__(coordinator)
+        self._environment_id = environment_id
+        self._sensor_type = sensor_type
+        self._attr_unique_id = f"environment:{environment_id}_{sensor_type.lower()}"
+        self._attr_has_entity_name = True
+        self._attr_name = sensor_type
+        self._attr_icon = "mdi:docker"
+
+    @property
+    def _environment(self) -> dict[str, Any]:
+        return self.coordinator.data["environments"].get(self._environment_id, {})
+
+    @property
+    def device_info(self) -> dict[str, Any]:
+        environment = self._environment
+        return {
+            "identifiers": {(DOMAIN, f"environment:{self._environment_id}")},
+            "name": environment.get("name", self._environment_id),
+            "manufacturer": "Arcane",
+            "model": f"Environment · {environment.get('type', 'Docker')}",
+        }
+
+    @property
+    def native_value(self) -> int:
+        containers = [
+            container
+            for container in self.coordinator.data["containers"].values()
+            if container.get("_environment_id") == self._environment_id
+        ]
+        if self._sensor_type == "Containers":
+            return len(containers)
+        if self._sensor_type == "Running":
+            return sum(container.get("state") == "running" for container in containers)
+        return sum(container.get("state") != "running" for container in containers)
