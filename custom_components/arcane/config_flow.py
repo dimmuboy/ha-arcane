@@ -10,10 +10,13 @@ from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.selector import SelectSelector, SelectSelectorConfig, SelectOptionDict
 
 from .api import ArcaneAPI, ArcaneAuthError
 from .const import (
     CONF_API_KEY,
+    CONF_ENV_ID,
+    CONF_ENV_NAME,
     CONF_HOST,
     CONF_SCAN_INTERVAL,
     DEFAULT_SCAN_INTERVAL,
@@ -30,8 +33,10 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
 )
 
 
-async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str, Any]:
-    """Validate Arcane Manager credentials and discover environments."""
+async def discover_environments(
+    hass: HomeAssistant, data: dict[str, Any]
+) -> list[dict[str, Any]]:
+    """Validate Arcane Manager credentials and return available environments."""
     session = async_get_clientsession(hass)
     api = ArcaneAPI(data[CONF_HOST], data[CONF_API_KEY], session)
 
@@ -46,11 +51,19 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
     if not isinstance(environments, list):
         raise CannotConnect
 
-    return {"title": "Arcane", "environment_count": len(environments)}
+    return [
+        environment
+        for environment in environments
+        if isinstance(environment, dict) and environment.get("id")
+    ]
 
 
 class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
-    VERSION = 2
+    VERSION = 3
+
+    def __init__(self) -> None:
+        self._connection_data: dict[str, Any] = {}
+        self._environments: dict[str, dict[str, Any]] = {}
 
     @staticmethod
     def async_get_options_flow(
@@ -64,7 +77,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
         if user_input is not None:
             try:
-                info = await validate_input(self.hass, user_input)
+                environments = await discover_environments(self.hass, user_input)
             except CannotConnect:
                 errors["base"] = "cannot_connect"
             except InvalidAuth:
@@ -73,16 +86,64 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 _LOGGER.exception("Unexpected exception")
                 errors["base"] = "unknown"
             else:
-                await self.async_set_unique_id(
-                    user_input[CONF_HOST].rstrip("/").lower()
-                )
-                self._abort_if_unique_id_configured()
-                return self.async_create_entry(title=info["title"], data=user_input)
+                if not environments:
+                    errors["base"] = "no_environments"
+                else:
+                    self._connection_data = dict(user_input)
+                    self._environments = {
+                        str(environment["id"]): environment
+                        for environment in environments
+                    }
+                    return await self.async_step_environment()
 
         return self.async_show_form(
             step_id="user", data_schema=STEP_USER_DATA_SCHEMA, errors=errors
         )
 
+    async def async_step_environment(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        if not self._connection_data or not self._environments:
+            return self.async_abort(reason="setup_expired")
+
+        if user_input is not None:
+            environment_id = str(user_input[CONF_ENV_ID])
+            environment = self._environments.get(environment_id)
+            if environment is None:
+                return self.async_abort(reason="environment_unavailable")
+
+            host = self._connection_data[CONF_HOST].rstrip("/").lower()
+            await self.async_set_unique_id(f"{host}:{environment_id}")
+            self._abort_if_unique_id_configured()
+
+            environment_name = str(environment.get("name") or environment_id)
+            return self.async_create_entry(
+                title=environment_name,
+                data={
+                    **self._connection_data,
+                    CONF_ENV_ID: environment_id,
+                    CONF_ENV_NAME: environment_name,
+                },
+            )
+
+        options = [
+            SelectOptionDict(
+                value=environment_id,
+                label=str(environment.get("name") or environment_id),
+            )
+            for environment_id, environment in self._environments.items()
+        ]
+
+        return self.async_show_form(
+            step_id="environment",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(CONF_ENV_ID): SelectSelector(
+                        SelectSelectorConfig(options=options)
+                    )
+                }
+            ),
+        )
 
 
 class ArcaneOptionsFlow(config_entries.OptionsFlow):

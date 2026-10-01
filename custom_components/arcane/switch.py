@@ -11,6 +11,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import ArcaneDataUpdateCoordinator
 from .const import DOMAIN, SIGNAL_NEW_CONTAINERS
+from .entity_helpers import container_device_info
 
 
 async def async_setup_entry(
@@ -52,17 +53,7 @@ class ArcaneContainerSwitch(CoordinatorEntity, SwitchEntity):
 
     @property
     def device_info(self) -> dict[str, Any]:
-        container = self._container
-        environment_id = container.get("_environment_id", "unknown")
-        environment_name = container.get("_environment_name", environment_id)
-        name = container.get("names", [self._container_key])[0].lstrip("/")
-        return {
-            "identifiers": {(DOMAIN, self._container_key)},
-            "name": name,
-            "manufacturer": "Arcane",
-            "model": f"Container · {environment_name}",
-            "via_device": (DOMAIN, f"environment:{environment_id}"),
-        }
+        return container_device_info(self._container)
 
     @property
     def is_on(self) -> bool:
