@@ -20,6 +20,23 @@ async def async_setup_entry(
 ) -> None:
     coordinator: ArcaneDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]
 
+    environment_entities = []
+    for environment_id in coordinator.data["environments"]:
+        for sensor_type in (
+            "Containers",
+            "Running",
+            "Stopped",
+            "Images",
+            "Docker version",
+            "Critical vulnerabilities",
+            "High vulnerabilities",
+        ):
+            environment_entities.append(
+                ArcaneEnvironmentSensor(coordinator, environment_id, sensor_type)
+            )
+    if environment_entities:
+        async_add_entities(environment_entities)
+
     def add_container_sensors(keys: set[str] | None = None) -> None:
         if keys is None:
             keys = set(coordinator.data["containers"])
@@ -158,7 +175,7 @@ class ArcaneEnvironmentSensor(CoordinatorEntity, SensorEntity):
         }
 
     @property
-    def native_value(self) -> int:
+    def native_value(self) -> str | int | None:
         containers = [
             container
             for container in self.coordinator.data["containers"].values()
@@ -168,7 +185,25 @@ class ArcaneEnvironmentSensor(CoordinatorEntity, SensorEntity):
             return len(containers)
         if self._sensor_type == "Running":
             return sum(container.get("state") == "running" for container in containers)
-        return sum(container.get("state") != "running" for container in containers)
+        if self._sensor_type == "Stopped":
+            return sum(container.get("state") != "running" for container in containers)
+
+        docker_info = self._environment.get("_docker_info")
+        if not isinstance(docker_info, dict):
+            docker_info = {}
+        if self._sensor_type == "Images":
+            return docker_info.get("Images")
+        if self._sensor_type == "Docker version":
+            return docker_info.get("ServerVersion")
+
+        vulnerabilities = self._environment.get("_vulnerabilities")
+        if not isinstance(vulnerabilities, dict):
+            vulnerabilities = {}
+        if self._sensor_type == "Critical vulnerabilities":
+            return vulnerabilities.get("critical")
+        if self._sensor_type == "High vulnerabilities":
+            return vulnerabilities.get("high")
+        return None
 
 
 
