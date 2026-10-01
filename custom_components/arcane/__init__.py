@@ -22,7 +22,7 @@ from .const import (
     SIGNAL_NEW_CONTAINERS,
 )
 
-PLATFORMS: list[Platform] = [Platform.SENSOR, Platform.SWITCH, Platform.UPDATE]
+PLATFORMS: list[Platform] = [\n    Platform.BUTTON,\n    Platform.SENSOR,\n    Platform.SWITCH,\n    Platform.UPDATE,\n]
 
 _LOGGER = logging.getLogger(__name__)
 
