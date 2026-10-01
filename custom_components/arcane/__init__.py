@@ -105,6 +105,29 @@ class ArcaneDataUpdateCoordinator(DataUpdateCoordinator):
                 environments[environment_id] = environment
 
                 try:
+                    projects_response = await self.api.get_projects(environment_id)
+                    project_items = projects_response.get("data", [])
+                    if isinstance(project_items, list):
+                        for project in project_items:
+                            project_id = str(project.get("id", ""))
+                            if not project_id:
+                                continue
+                            project_key = f"{environment_id}:{project_id}"
+                            projects[project_key] = {
+                                **project,
+                                "_environment_id": environment_id,
+                                "_environment_name": environment.get(
+                                    "name", environment_id
+                                ),
+                            }
+                except Exception as err:
+                    _LOGGER.warning(
+                        "Unable to fetch projects for Arcane environment %s: %s",
+                        environment_id,
+                        err,
+                    )
+
+                try:
                     response = await self.api.get_containers(environment_id)
                 except Exception as err:
                     _LOGGER.warning(
@@ -149,6 +172,7 @@ class ArcaneDataUpdateCoordinator(DataUpdateCoordinator):
             return {
                 "environments": environments,
                 "containers": containers,
+                "projects": projects,
             }
         except ArcaneAuthError:
             raise
