@@ -180,15 +180,27 @@ class ArcaneProjectUpdateEntity(CoordinatorEntity, UpdateEntity):
 
     @property
     def installed_version(self) -> str:
-        return "Current"
+        return "0"
 
     @property
     def latest_version(self) -> str:
         info = self._project.get("updateInfo")
         if isinstance(info, dict) and info.get("hasUpdate"):
-            count = info.get("imagesWithUpdates", 1)
-            return f"{count} update(s) available"
-        return "Current"
+            return "1"
+        return "0"
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        info = self._project.get("updateInfo")
+        if not isinstance(info, dict):
+            return {}
+        return {
+            "images_with_updates": info.get("imagesWithUpdates", 0),
+            "image_count": info.get("imageCount", 0),
+            "checked_image_count": info.get("checkedImageCount", 0),
+            "update_status": info.get("status"),
+            "last_checked_at": info.get("lastCheckedAt"),
+        }
 
     async def async_install(
         self, version: str | None = None, backup: bool = True, **kwargs: Any
