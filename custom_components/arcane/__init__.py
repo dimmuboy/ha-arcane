@@ -109,7 +109,37 @@ class ArcaneDataUpdateCoordinator(DataUpdateCoordinator):
                 if not environment_id:
                     continue
 
-                environments[environment_id] = environment
+                environment_data = dict(environment)
+                try:
+                    environment_data["_docker_info"] = await self.api.get_docker_info(
+                        environment_id
+                    )
+                except Exception as err:
+                    _LOGGER.debug(
+                        "Unable to fetch Docker info for Arcane environment %s: %s",
+                        environment_id,
+                        err,
+                    )
+
+                vulnerability_counts = {}
+                for severity in ("critical", "high"):
+                    try:
+                        response = await self.api.get_vulnerabilities(
+                            environment_id, severity
+                        )
+                        pagination = response.get("pagination", {})
+                        vulnerability_counts[severity] = pagination.get(
+                            "totalItems", 0
+                        )
+                    except Exception as err:
+                        _LOGGER.debug(
+                            "Unable to fetch %s vulnerabilities for environment %s: %s",
+                            severity,
+                            environment_id,
+                            err,
+                        )
+                environment_data["_vulnerabilities"] = vulnerability_counts
+                environments[environment_id] = environment_data
 
                 try:
                     projects_response = await self.api.get_projects(environment_id)
