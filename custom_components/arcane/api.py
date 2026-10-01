@@ -82,6 +82,23 @@ class ArcaneAPI:
             f"/environments/{environment_id}/containers?start=0&limit=100",
         )
 
+    async def get_docker_info(self, environment_id: str) -> dict[str, Any]:
+        """Return Docker daemon information for an environment."""
+        return await self._request(
+            "GET", f"/environments/{environment_id}/system/docker/info"
+        )
+
+    async def get_vulnerabilities(
+        self, environment_id: str, severity: str | None = None
+    ) -> dict[str, Any]:
+        """Return environment vulnerabilities."""
+        path = (
+            f"/environments/{environment_id}/vulnerabilities/all?start=0&limit=1"
+        )
+        if severity:
+            path += f"&severity={severity}"
+        return await self._request("GET", path)
+
     async def get_projects(self, environment_id: str) -> dict[str, Any]:
         """Return Compose projects for an environment."""
         return await self._request(
