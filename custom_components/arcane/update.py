@@ -109,6 +109,17 @@ class ArcaneUpdateEntity(CoordinatorEntity, UpdateEntity):
         return UpdateEntityFeature.INSTALL
 
     @property
+    def name(self) -> str:
+        container = self._container or {}
+        names = container.get("names", [])
+        container_name = (
+            names[0].lstrip("/")
+            if isinstance(names, list) and names and isinstance(names[0], str)
+            else self._container_key.split(":", 1)[-1]
+        )
+        return f"{container_name} · Update"
+
+    @property
     def device_info(self) -> dict[str, Any]:
         return container_device_info(self._container or {})
 

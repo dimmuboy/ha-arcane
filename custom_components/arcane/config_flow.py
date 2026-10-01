@@ -118,7 +118,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
             environment_name = str(environment.get("name") or environment_id)
             return self.async_create_entry(
-                title=environment_name,
+                title=f"Arcane · {environment_name}",
                 data={
                     **self._connection_data,
                     CONF_ENV_ID: environment_id,
