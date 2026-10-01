@@ -17,9 +17,11 @@ from .const import (
     CONF_API_KEY,
     CONF_ENV_ID,
     CONF_HOST,
+    CONF_SCAN_INTERVAL,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
     SIGNAL_NEW_CONTAINERS,
+    SIGNAL_NEW_PROJECTS,
 )
 
 PLATFORMS: list[Platform] = [
@@ -56,7 +58,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         session,
     )
 
-    coordinator = ArcaneDataUpdateCoordinator(hass, api, entry.entry_id)
+    coordinator = ArcaneDataUpdateCoordinator(\n        hass,\n        api,\n        entry.entry_id,\n        entry.options.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL),\n    )
 
     try:
         await coordinator.async_config_entry_first_refresh()
@@ -80,7 +82,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 class ArcaneDataUpdateCoordinator(DataUpdateCoordinator):
     """Coordinate data for all environments managed by one Arcane Manager."""
 
-    def __init__(self, hass: HomeAssistant, api: ArcaneAPI, entry_id: str) -> None:
+    def __init__(\n        self,\n        hass: HomeAssistant,\n        api: ArcaneAPI,\n        entry_id: str,\n        scan_interval: int,\n    ) -> None:
         self.api = api
         self.entry_id = entry_id
         self.known_container_keys: set[str] = set()
@@ -89,7 +91,7 @@ class ArcaneDataUpdateCoordinator(DataUpdateCoordinator):
             hass,
             _LOGGER,
             name=DOMAIN,
-            update_interval=timedelta(seconds=DEFAULT_SCAN_INTERVAL),
+            update_interval=timedelta(seconds=scan_interval),
         )
 
     async def _async_update_data(self) -> dict[str, Any]:
@@ -194,6 +196,17 @@ class ArcaneDataUpdateCoordinator(DataUpdateCoordinator):
                         "_environment_id": environment_id,
                         "_environment_name": environment.get("name", environment_id),
                     }
+
+            new_project_keys = set(projects) - self.known_project_keys
+            if new_project_keys and self.known_project_keys:
+                self.known_project_keys.update(new_project_keys)
+                async_dispatcher_send(
+                    self.hass,
+                    f"{SIGNAL_NEW_PROJECTS}_{self.entry_id}",
+                    new_project_keys,
+                )
+            elif not self.known_project_keys:
+                self.known_project_keys.update(new_project_keys)
 
             new_keys = set(containers) - self.known_container_keys
             if new_keys and self.known_container_keys:
