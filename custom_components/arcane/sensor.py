@@ -1,19 +1,16 @@
 from __future__ import annotations
 
-import logging
 from typing import Any
 
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
+from . import ArcaneDataUpdateCoordinator
 from .const import DOMAIN, SIGNAL_NEW_CONTAINERS
-from .__init__ import ArcaneDataUpdateCoordinator
-from homeassistant.helpers.dispatcher import async_dispatcher_connect
-
-_LOGGER = logging.getLogger(__name__)
 
 
 async def async_setup_entry(
@@ -23,28 +20,27 @@ async def async_setup_entry(
 ) -> None:
     coordinator: ArcaneDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]
 
-    def async_add_container_sensors(ids: set[str] | None = None) -> None:
-        """Add sensors for new containers."""
-        if ids is None:
-            ids = set(coordinator.data.keys())
+    def add_container_sensors(keys: set[str] | None = None) -> None:
+        if keys is None:
+            keys = set(coordinator.data["containers"])
 
         entities = []
-        for container_id in ids:
-            entities.append(ArcaneSensor(coordinator, container_id, "State"))
-            entities.append(ArcaneSensor(coordinator, container_id, "Image"))
-
+        for key in keys:
+            entities.extend(
+                (
+                    ArcaneSensor(coordinator, key, "State"),
+                    ArcaneSensor(coordinator, key, "Image"),
+                )
+            )
         if entities:
             async_add_entities(entities)
 
-    # Add initial sensors
-    async_add_container_sensors()
-
-    # Listen for new containers
+    add_container_sensors()
     entry.async_on_unload(
         async_dispatcher_connect(
             hass,
             f"{SIGNAL_NEW_CONTAINERS}_{entry.entry_id}",
-            async_add_container_sensors,
+            add_container_sensors,
         )
     )
 
@@ -53,37 +49,38 @@ class ArcaneSensor(CoordinatorEntity, SensorEntity):
     def __init__(
         self,
         coordinator: ArcaneDataUpdateCoordinator,
-        container_id: str,
+        container_key: str,
         sensor_type: str,
     ) -> None:
         super().__init__(coordinator)
-        self._container_id = container_id
+        self._container_key = container_key
         self._sensor_type = sensor_type
-        self._attr_unique_id = f"{container_id}_{sensor_type.lower()}"
+        self._attr_unique_id = f"{container_key}_{sensor_type.lower()}"
         self._attr_has_entity_name = True
         self._attr_name = sensor_type
-        if sensor_type == "State":
-            self._attr_icon = "mdi:docker"
-        elif sensor_type == "Image":
-            self._attr_icon = "mdi:image"
+        self._attr_icon = "mdi:docker" if sensor_type == "State" else "mdi:image"
+
+    @property
+    def _container(self) -> dict[str, Any]:
+        return self.coordinator.data["containers"].get(self._container_key, {})
 
     @property
     def device_info(self) -> dict[str, Any]:
-        container = self.coordinator.data.get(self._container_id, {})
+        container = self._container
+        environment_id = container.get("_environment_id", "unknown")
+        environment_name = container.get("_environment_name", environment_id)
+        name = container.get("names", [self._container_key])[0].lstrip("/")
         return {
-            "identifiers": {(DOMAIN, self._container_id)},
-            "name": container.get("names", [self._container_id])[0].lstrip("/"),
+            "identifiers": {(DOMAIN, self._container_key)},
+            "name": name,
             "manufacturer": "Arcane",
-            "model": "Container",
-            "sw_version": container.get("image"),
+            "model": f"Container · {environment_name}",
+            "via_device": (DOMAIN, f"environment:{environment_id}"),
         }
 
     @property
     def native_value(self) -> str | None:
-        container = self.coordinator.data.get(self._container_id)
-        if container is None:
-            return None
-
+        container = self._container
         if self._sensor_type == "State":
             return container.get("state")
         if self._sensor_type == "Image":
