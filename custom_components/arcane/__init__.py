@@ -22,7 +22,12 @@ from .const import (
     SIGNAL_NEW_CONTAINERS,
 )
 
-PLATFORMS: list[Platform] = [\n    Platform.BUTTON,\n    Platform.SENSOR,\n    Platform.SWITCH,\n    Platform.UPDATE,\n]
+PLATFORMS: list[Platform] = [
+    Platform.BUTTON,
+    Platform.SENSOR,
+    Platform.SWITCH,
+    Platform.UPDATE,
+]
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -78,7 +83,8 @@ class ArcaneDataUpdateCoordinator(DataUpdateCoordinator):
     def __init__(self, hass: HomeAssistant, api: ArcaneAPI, entry_id: str) -> None:
         self.api = api
         self.entry_id = entry_id
-        self.known_container_keys: set[str] = set()\n        self.known_project_keys: set[str] = set()
+        self.known_container_keys: set[str] = set()
+        self.known_project_keys: set[str] = set()
         super().__init__(
             hass,
             _LOGGER,
@@ -95,7 +101,8 @@ class ArcaneDataUpdateCoordinator(DataUpdateCoordinator):
                 raise UpdateFailed("Arcane returned an invalid environments response")
 
             environments: dict[str, dict[str, Any]] = {}
-            containers: dict[str, dict[str, Any]] = {}\n            projects: dict[str, dict[str, Any]] = {}
+            containers: dict[str, dict[str, Any]] = {}
+            projects: dict[str, dict[str, Any]] = {}
 
             for environment in environment_list:
                 environment_id = str(environment.get("id", ""))
