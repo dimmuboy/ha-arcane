@@ -58,7 +58,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         session,
     )
 
-    coordinator = ArcaneDataUpdateCoordinator(\n        hass,\n        api,\n        entry.entry_id,\n        entry.options.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL),\n    )
+    coordinator = ArcaneDataUpdateCoordinator(
+        hass,
+        api,
+        entry.entry_id,
+        entry.options.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL),
+    )
 
     try:
         await coordinator.async_config_entry_first_refresh()
@@ -82,7 +87,13 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 class ArcaneDataUpdateCoordinator(DataUpdateCoordinator):
     """Coordinate data for all environments managed by one Arcane Manager."""
 
-    def __init__(\n        self,\n        hass: HomeAssistant,\n        api: ArcaneAPI,\n        entry_id: str,\n        scan_interval: int,\n    ) -> None:
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        api: ArcaneAPI,
+        entry_id: str,
+        scan_interval: int,
+    ) -> None:
         self.api = api
         self.entry_id = entry_id
         self.known_container_keys: set[str] = set()
