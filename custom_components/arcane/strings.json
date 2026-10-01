@@ -18,5 +18,16 @@
     "abort": {
       "already_configured": "This Arcane Manager is already configured"
     }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Arcane options",
+        "description": "Configure how often Arcane data is refreshed.",
+        "data": {
+          "scan_interval": "Polling interval (seconds)"
+        }
+      }
+    }
   }
 }
