@@ -27,9 +27,9 @@ PLATFORMS: list[Platform] = [Platform.SENSOR, Platform.SWITCH, Platform.UPDATE]
 _LOGGER = logging.getLogger(__name__)
 
 
-def container_key(environment_id: str, container_id: str) -> str:
-    """Return a globally unique container key within one Arcane Manager."""
-    return f"{environment_id}:{container_id}"
+def container_key(environment_id: str, container_name: str) -> str:
+    """Return a stable container key within one Arcane Manager."""
+    return f"{environment_id}:{container_name}"
 
 
 async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -122,7 +122,13 @@ class ArcaneDataUpdateCoordinator(DataUpdateCoordinator):
                     container_id = str(container.get("id", ""))
                     if not container_id:
                         continue
-                    key = container_key(environment_id, container_id)
+                    names = container.get("names")
+                    container_name = (
+                        names[0].lstrip("/")
+                        if isinstance(names, list) and names and isinstance(names[0], str)
+                        else container_id
+                    )
+                    key = container_key(environment_id, container_name)
                     containers[key] = {
                         **container,
                         "_environment_id": environment_id,
