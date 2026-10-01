@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import timedelta
 import logging
+from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
@@ -11,7 +12,7 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-from .api import ArcaneAPI
+from .api import ArcaneAPI, ArcaneAuthError
 from .const import (
     CONF_API_KEY,
     CONF_ENV_ID,
@@ -26,13 +27,29 @@ PLATFORMS: list[Platform] = [Platform.SENSOR, Platform.SWITCH, Platform.UPDATE]
 _LOGGER = logging.getLogger(__name__)
 
 
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    host = entry.data[CONF_HOST]
-    api_key = entry.data[CONF_API_KEY]
-    env_id = entry.data[CONF_ENV_ID]
+def container_key(environment_id: str, container_id: str) -> str:
+    """Return a globally unique container key within one Arcane Manager."""
+    return f"{environment_id}:{container_id}"
 
+
+async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Migrate legacy single-environment config entries."""
+    if entry.version == 1:
+        data = dict(entry.data)
+        data.pop(CONF_ENV_ID, None)
+        hass.config_entries.async_update_entry(entry, data=data, version=2)
+        _LOGGER.info("Migrated Arcane config entry to multi-environment format")
+    return True
+
+
+async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Set up Arcane from a config entry."""
     session = async_get_clientsession(hass)
-    api = ArcaneAPI(host, api_key, env_id, session)
+    api = ArcaneAPI(
+        entry.data[CONF_HOST],
+        entry.data[CONF_API_KEY],
+        session,
+    )
 
     coordinator = ArcaneDataUpdateCoordinator(hass, api, entry.entry_id)
 
@@ -45,46 +62,91 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data[DOMAIN][entry.entry_id] = coordinator
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
-
     return True
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Unload an Arcane config entry."""
     if unload_ok := await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
         hass.data[DOMAIN].pop(entry.entry_id)
-
     return unload_ok
 
 
 class ArcaneDataUpdateCoordinator(DataUpdateCoordinator):
+    """Coordinate data for all environments managed by one Arcane Manager."""
+
     def __init__(self, hass: HomeAssistant, api: ArcaneAPI, entry_id: str) -> None:
         self.api = api
         self.entry_id = entry_id
+        self.known_container_keys: set[str] = set()
         super().__init__(
             hass,
             _LOGGER,
             name=DOMAIN,
             update_interval=timedelta(seconds=DEFAULT_SCAN_INTERVAL),
         )
-        self.known_container_ids: set[str] = set()
 
-    async def _async_update_data(self):
+    async def _async_update_data(self) -> dict[str, Any]:
+        """Fetch environments and their containers."""
         try:
-            containers_response = await self.api.get_containers()
-            containers = containers_response.get("data", [])
-            data = {container["id"]: container for container in containers}
+            environments_response = await self.api.get_environments()
+            environment_list = environments_response.get("data", [])
+            if not isinstance(environment_list, list):
+                raise UpdateFailed("Arcane returned an invalid environments response")
 
-            new_ids = set(data.keys()) - self.known_container_ids
-            if new_ids and self.known_container_ids:
-                self.known_container_ids.update(new_ids)
+            environments: dict[str, dict[str, Any]] = {}
+            containers: dict[str, dict[str, Any]] = {}
+
+            for environment in environment_list:
+                environment_id = str(environment.get("id", ""))
+                if not environment_id:
+                    continue
+
+                environments[environment_id] = environment
+
+                try:
+                    response = await self.api.get_containers(environment_id)
+                except Exception as err:
+                    _LOGGER.warning(
+                        "Unable to fetch containers for Arcane environment %s: %s",
+                        environment_id,
+                        err,
+                    )
+                    continue
+
+                items = response.get("data", [])
+                if not isinstance(items, list):
+                    continue
+
+                for container in items:
+                    container_id = str(container.get("id", ""))
+                    if not container_id:
+                        continue
+                    key = container_key(environment_id, container_id)
+                    containers[key] = {
+                        **container,
+                        "_environment_id": environment_id,
+                        "_environment_name": environment.get("name", environment_id),
+                    }
+
+            new_keys = set(containers) - self.known_container_keys
+            if new_keys and self.known_container_keys:
+                self.known_container_keys.update(new_keys)
                 async_dispatcher_send(
                     self.hass,
                     f"{SIGNAL_NEW_CONTAINERS}_{self.entry_id}",
-                    new_ids,
+                    new_keys,
                 )
-            elif not self.known_container_ids:
-                self.known_container_ids.update(new_ids)
+            elif not self.known_container_keys:
+                self.known_container_keys.update(new_keys)
 
-            return data
+            return {
+                "environments": environments,
+                "containers": containers,
+            }
+        except ArcaneAuthError:
+            raise
+        except UpdateFailed:
+            raise
         except Exception as err:
             raise UpdateFailed(f"Error communicating with API: {err}") from err
