@@ -77,6 +77,37 @@ class ArcaneAPI:
             f"/environments/{environment_id}/containers?start=0&limit=100",
         )
 
+    async def get_projects(self, environment_id: str) -> dict[str, Any]:
+        """Return Compose projects for an environment."""
+        return await self._request(
+            "GET",
+            f"/environments/{environment_id}/projects?start=0&limit=100",
+        )
+
+    async def control_project(
+        self, environment_id: str, project_id: str, action: str
+    ) -> dict[str, Any]:
+        """Run a supported Compose project action."""
+        if action not in {"restart", "redeploy"}:
+            raise ValueError(f"Invalid project action: {action}")
+
+        return await self._request(
+            "POST",
+            f"/environments/{environment_id}/projects/{project_id}/{action}",
+            timeout=300,
+        )
+
+    async def update_project(
+        self, environment_id: str, project_id: str
+    ) -> dict[str, Any]:
+        """Pull latest images and recreate all services in a project."""
+        return await self._request(
+            "POST",
+            f"/environments/{environment_id}/projects/{project_id}/update-services",
+            timeout=300,
+            json={},
+        )
+
     async def control_container(
         self, environment_id: str, container_id: str, action: str
     ) -> None:
