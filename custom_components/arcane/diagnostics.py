@@ -6,7 +6,6 @@ from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers import config_entry_oauth2_flow
 from homeassistant.helpers.redact import async_redact_data
 
 from .const import CONF_API_KEY, DOMAIN
