@@ -6,11 +6,15 @@ Arcane is a modern, self-hosted Docker management platform. This integration all
 
 ## Features
 
-- **Monitor Container State:** Real-time status of your Docker containers.
-- **Control Containers:** Start, Stop, and Restart containers from the HA dashboard.
-- **Update Containers:** Install available image updates through Home Assistant update entities.
-- **Graceful Shutdown:** Stops containers gracefully.
-- **Sensor Data:** Monitor container images and status.
+- Automatic discovery of all environments managed by one Arcane Manager, including Edge environments
+- Environment devices with Docker container, image, version, and vulnerability summaries
+- Container devices with state, image, CPU, memory usage, memory limit, start/stop, restart, redeploy, and update controls
+- Docker Compose project devices with status, service counts, restart, redeploy, and project-wide updates
+- Environment-aware stable entity identities, so identical container and project names can exist in different environments
+- Configurable polling interval
+- Home Assistant diagnostics with the API key redacted
+- Local polling through the Arcane API
+
 
 ## Installation
 
@@ -35,11 +39,7 @@ Arcane is a modern, self-hosted Docker management platform. This integration all
 1. Go to **Settings** -> **Devices & Services**.
 2. Click **Add Integration**.
 3. Search for **Arcane**.
-4. Enter your Arcane Host, API Key, and Environment ID (default is `0` for local).
-
-## Container Updates
-
-Home Assistant update entities use Arcane's redeploy endpoint. Arcane pulls the latest image and recreates the container while preserving its existing configuration. The update entity is disabled when Arcane reports that redeploy is disabled for a container, such as the Arcane server container itself.
+4. Enter your Arcane Host, API Key, and ng configuration. The update entity is disabled when Arcane reports that redeploy is disabled for a container, such as the Arcane server container itself.
 
 ## License
 
