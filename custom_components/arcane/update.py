@@ -36,6 +36,14 @@ async def async_setup_entry(
             async_add_entities(entities)
 
     add_container_updates()
+
+    project_updates = [
+        ArcaneProjectUpdateEntity(coordinator, key)
+        for key in coordinator.data.get("projects", {})
+    ]
+    if project_updates:
+        async_add_entities(project_updates)
+
     entry.async_on_unload(
         async_dispatcher_connect(
             hass,
