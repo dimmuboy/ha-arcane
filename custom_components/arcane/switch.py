@@ -59,7 +59,7 @@ class ArcaneContainerSwitch(CoordinatorEntity, SwitchEntity):
             if isinstance(names, list) and names and isinstance(names[0], str)
             else self._container_key.split(":", 1)[-1]
         )
-        return f"{container_name} · Running"
+        return f"Running {container_name}"
 
     @property
     def device_info(self) -> dict[str, Any]:
